@@ -1,6 +1,6 @@
 # OpenCE: The Open Context Engineering Toolkit
 
-[English](https://github.com/sci-m-wang/ACE-open/README.md) | [中文](https://github.com/sci-m-wang/ACE-open/README_ZH.md)
+[English](https://github.com/sci-m-wang/OpenCE/README.md) | [中文](https://github.com/sci-m-wang/OpenCE/README_ZH.md)
 
 ### 🚀 Project Evolution: From `ACE-open` to `OpenCE`
 
