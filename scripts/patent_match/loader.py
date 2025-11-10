@@ -1,4 +1,4 @@
-"""Data loader for patent matching task."""
+"""Data loader for patent matching task (auto-generating candidate IDs when absent)."""
 
 from __future__ import annotations
 
@@ -14,98 +14,123 @@ if str(ROOT) not in sys.path:
 from ace import Sample
 
 
+def _normalize_ctx_list(raw_ctx: Any) -> List[Dict[str, Any]]:
+    """Ensure the context list is a list of dicts."""
+    if not isinstance(raw_ctx, list):
+        return []
+    return [c for c in raw_ctx if isinstance(c, dict)]
+
+
 def load_patent_samples(path: Path) -> List[Sample]:
-    """Load patent matching samples from JSON file.
-    
-    Expected JSON format:
+    """
+    Load patent matching samples from a JSON file in the 'original' format:
+
     [
         {
             "question": "...",
-            "positive_ctxs": [{"id": "...", "text": "..."}],
-            "negative_ctxs": [{"id": "...", "text": "..."}],
-            "hard_negative_ctxs": [{"id": "...", "text": "..."}]
+            "positive_ctxs": [
+                {"title": "...", "text": "...", "passage_id": ""}, ...
+            ],
+            "negative_ctxs": [
+                {"title": "...", "text": "...", "passage_id": ""}, ...
+            ],
+            "hard_negative_ctxs": [
+                {"title": "...", "text": "...", "passage_id": ""}, ...
+            ]
         },
         ...
     ]
-    
-    Args:
-        path: Path to JSON file containing patent samples
-        
+
+    ID generation (when missing):
+      positive      -> p{sample_index}_{k}
+      negative      -> n{sample_index}_{k}
+      hard_negative -> hn{sample_index}_{k}
+
+    If a context dict already contains a non-empty 'id' key, that value is preserved.
+
     Returns:
-        List of Sample objects with candidates and ground_truth_ids in context
+        List[Sample] where Sample.context is a JSON string:
+        {
+          "candidates": [
+             {"id": "...", "text": "...", "label": "positive|negative", "type": "positive|negative|hard_negative"}
+          ],
+          "ground_truth_ids": ["id1", "id2", ...]
+        }
+        Sample.ground_truth stores JSON string of ground_truth_ids (positive IDs).
     """
-    with open(path, 'r', encoding='utf-8') as f:
+    with path.open('r', encoding='utf-8') as f:
         data = json.load(f)
-    
+
     if not isinstance(data, list):
         raise ValueError("Expected JSON file to contain a list of samples")
-    
+
     samples: List[Sample] = []
-    
-    for idx, item in enumerate(data):
+
+    for sample_idx, item in enumerate(data):
         if not isinstance(item, dict):
-            raise ValueError(f"Sample at index {idx} is not a dictionary")
-        
+            raise ValueError(f"Sample at index {sample_idx} is not a dictionary")
+
         question = item.get("question", "")
         if not question:
-            raise ValueError(f"Sample at index {idx} missing 'question' field")
-        
-        # Build unified candidates list with label and type
+            raise ValueError(f"Sample at index {sample_idx} missing 'question' field")
+
+        positive_ctxs = _normalize_ctx_list(item.get("positive_ctxs", []))
+        negative_ctxs = _normalize_ctx_list(item.get("negative_ctxs", []))
+        hard_negative_ctxs = _normalize_ctx_list(item.get("hard_negative_ctxs", []))
+
         candidates: List[Dict[str, Any]] = []
         ground_truth_ids: List[str] = []
-        
+
         # Process positive contexts
-        positive_ctxs = item.get("positive_ctxs", [])
-        if not isinstance(positive_ctxs, list):
-            positive_ctxs = []
-        for ctx in positive_ctxs:
-            if isinstance(ctx, dict) and "id" in ctx and "text" in ctx:
-                ctx_id = str(ctx["id"])
-                candidates.append({
-                    "id": ctx_id,
-                    "text": str(ctx["text"]),
-                    "label": "positive",
-                    "type": "positive"
-                })
-                ground_truth_ids.append(ctx_id)
-        
+        for k, ctx in enumerate(positive_ctxs):
+            raw_id = str(ctx.get("id", "")).strip()
+            ctx_id = raw_id if raw_id else f"p{sample_idx}_{k}"
+            text = str(ctx.get("text", "")).strip()
+            candidates.append({
+                "id": ctx_id,
+                "text": text,
+                "label": "positive",
+                "type": "positive",
+                "title": str(ctx.get("title", "")),
+            })
+            ground_truth_ids.append(ctx_id)
+
         # Process negative contexts
-        negative_ctxs = item.get("negative_ctxs", [])
-        if not isinstance(negative_ctxs, list):
-            negative_ctxs = []
-        for ctx in negative_ctxs:
-            if isinstance(ctx, dict) and "id" in ctx and "text" in ctx:
-                candidates.append({
-                    "id": str(ctx["id"]),
-                    "text": str(ctx["text"]),
-                    "label": "negative",
-                    "type": "negative"
-                })
-        
+        for k, ctx in enumerate(negative_ctxs):
+            raw_id = str(ctx.get("id", "")).strip()
+            ctx_id = raw_id if raw_id else f"n{sample_idx}_{k}"
+            text = str(ctx.get("text", "")).strip()
+            candidates.append({
+                "id": ctx_id,
+                "text": text,
+                "label": "negative",
+                "type": "negative",
+                "title": str(ctx.get("title", "")),
+            })
+
         # Process hard negative contexts
-        hard_negative_ctxs = item.get("hard_negative_ctxs", [])
-        if not isinstance(hard_negative_ctxs, list):
-            hard_negative_ctxs = []
-        for ctx in hard_negative_ctxs:
-            if isinstance(ctx, dict) and "id" in ctx and "text" in ctx:
-                candidates.append({
-                    "id": str(ctx["id"]),
-                    "text": str(ctx["text"]),
-                    "label": "negative",
-                    "type": "hard_negative"
-                })
-        
-        # Create context as JSON string containing candidates and ground truth
+        for k, ctx in enumerate(hard_negative_ctxs):
+            raw_id = str(ctx.get("id", "")).strip()
+            ctx_id = raw_id if raw_id else f"hn{sample_idx}_{k}"
+            text = str(ctx.get("text", "")).strip()
+            candidates.append({
+                "id": ctx_id,
+                "text": text,
+                "label": "negative",        # label remains 'negative' for classification
+                "type": "hard_negative",
+                "title": str(ctx.get("title", "")),
+            })
+
         context_data = {
             "candidates": candidates,
             "ground_truth_ids": ground_truth_ids
         }
-        
+
         sample = Sample(
             question=question,
             context=json.dumps(context_data, ensure_ascii=False),
             ground_truth=json.dumps(ground_truth_ids, ensure_ascii=False)
         )
         samples.append(sample)
-    
+
     return samples
