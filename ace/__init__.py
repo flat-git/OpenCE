@@ -3,6 +3,7 @@
 from .playbook import Bullet, Playbook
 from .delta import DeltaOperation, DeltaBatch
 from .llm import LLMClient, DummyLLMClient, TransformersLLMClient
+from .llm_deepseek import DeepSeekClient
 from .roles import (
     Generator,
     Reflector,
@@ -28,6 +29,7 @@ __all__ = [
     "LLMClient",
     "DummyLLMClient",
     "TransformersLLMClient",
+    "DeepSeekClient",
     "Generator",
     "Reflector",
     "Curator",
