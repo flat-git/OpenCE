@@ -1,0 +1,44 @@
+[
+  {
+    "question": "A method for wireless power transfer using magnetic resonance coupling between a transmitter coil and a receiver coil, where the coupling efficiency is dynamically adjusted based on distance measurements.",
+    "positive_ctxs": [
+      {
+        "id": "pos-1",
+        "text": "The invention relates to wireless power transfer systems utilizing magnetic resonance at a specific frequency. The transmitter includes a power amplifier driving a resonant coil, and the receiver coil is tuned to the same resonant frequency. A distance sensor measures the gap between coils and adjusts the driving frequency to maintain optimal coupling efficiency, thereby maximizing power transfer while minimizing losses."
+      }
+    ],
+    "negative_ctxs": [
+      {
+        "id": "neg-1",
+        "text": "This patent describes an inductive charging system for electric vehicles using simple electromagnetic induction without resonance. The system operates at fixed frequency and does not include distance measurement or dynamic adjustment capabilities."
+      }
+    ],
+    "hard_negative_ctxs": [
+      {
+        "id": "hard-neg-1",
+        "text": "A wireless charging system using magnetic resonance coupling is disclosed. The system includes transmitter and receiver coils operating at resonant frequency. However, the coupling efficiency is pre-calibrated during manufacturing and remains fixed during operation without any dynamic adjustment mechanism."
+      }
+    ]
+  },
+  {
+    "question": "A neural network model compression technique using knowledge distillation from a large teacher model to a smaller student model, with temperature scaling in the softmax layer.",
+    "positive_ctxs": [
+      {
+        "id": "pos-2",
+        "text": "The invention provides a method for model compression where a large pre-trained teacher network guides the training of a compact student network. During training, the softmax outputs of both models are scaled by a temperature parameter T>1, making the probability distributions softer and exposing more information about class relationships. The student network minimizes both the cross-entropy with true labels and the KL divergence with teacher's softened outputs."
+      }
+    ],
+    "negative_ctxs": [
+      {
+        "id": "neg-2",
+        "text": "A method for neural network pruning by removing weights with small magnitudes. The pruning process iteratively removes low-value connections and retrains the network. No teacher-student framework or temperature scaling is involved."
+      }
+    ],
+    "hard_negative_ctxs": [
+      {
+        "id": "hard-neg-2",
+        "text": "This invention describes knowledge distillation for model compression where a student model learns from a teacher model's outputs. The student is trained to match the teacher's predictions using mean squared error loss. The method does not incorporate temperature scaling or softmax modification."
+      }
+    ]
+  }
+]
