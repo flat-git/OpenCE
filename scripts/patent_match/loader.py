@@ -52,7 +52,8 @@ def load_patent_samples(path: Path) -> List[Sample]:
         List[Sample] where Sample.context is a JSON string:
         {
           "candidates": [
-             {"id": "...", "text": "...", "label": "positive|negative", "type": "positive|negative|hard_negative"}
+             {"id": "...", "text": "...", "label": "positive|negative",
+              "type": "positive|negative|hard_negative", "title": "..."}
           ],
           "ground_truth_ids": ["id1", "id2", ...]
         }
@@ -116,7 +117,7 @@ def load_patent_samples(path: Path) -> List[Sample]:
             candidates.append({
                 "id": ctx_id,
                 "text": text,
-                "label": "negative",        # label remains 'negative' for classification
+                "label": "negative",        # classification label stays 'negative'
                 "type": "hard_negative",
                 "title": str(ctx.get("title", "")),
             })
