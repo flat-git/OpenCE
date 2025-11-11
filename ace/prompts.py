@@ -67,12 +67,17 @@ GROUND TRUTH:
 ENVIRONMENT FEEDBACK (includes metrics and error analysis):
 {feedback}
 
+DIAGNOSTICS (element-level analysis):
+{diagnostics}
+
 PLAYBOOK BULLETS YOU USED:
 {playbook_excerpt}
 
 TASK:
 - Parse the feedback JSON to identify false negatives (FN) and false positives (FP, including hard_negative).
-- Use the provided elements and evidence_map (if present) to locate which claim elements were missed or misinterpreted.
+- Use the provided diagnostics (elements, coverage, match types) to locate which claim elements were missed or misinterpreted.
+- Identify error categories from: ["structure-missing","numeric-soft-miss","functional-equivalence-ignored","term-normalization-fail","multi-span-aggregation-miss"]
+- Identify culprit bullets that led to incorrect decisions.
 - Focus on systematic failure modes: (a) missing element verification, (b) failure to recognize functional equivalence, (c) being over-conservative when only minor elements are missing.
 
 STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
@@ -86,6 +91,8 @@ STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
   "root_cause_analysis": "Explain why elements were missed or why over-conservatism happened.",
   "correct_approach": "Concrete corrections (e.g., accept positive if ≥80% critical elements are covered; add synonym mapping X≈Y).",
   "key_insight": "ONE concise rule to prevent similar errors next time.",
+  "error_categories": ["functional-equivalence-ignored", "structure-missing"],
+  "culprit_bullets": ["bullet-00123", "bullet-00456"],
   "bullet_tags": [{{"id": "bullet_id", "tag": "keep|revise|remove"}}]
 }}"""
 
@@ -110,6 +117,8 @@ GOALS:
 - Reduce false negatives while keeping false positives low.
 - Prefer UPDATE to refine existing bullets; limit ADD to at most 2 per iteration.
 - Consolidate overlapping bullets (avoid duplicates); keep bullets short, actionable, and element-oriented.
+- Support operations: UPDATE (preferred), TAG, DEPRECATE, ADD (restricted).
+- ADD is only allowed if new content has similarity < 0.85 with existing bullets.
 
 STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
@@ -120,6 +129,16 @@ STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
       "bullet_id": "existing_bullet_id",
       "content": "Refine: require element-wise mapping; accept positive if ≥80% critical elements covered and missing ones are minor; list missing elements in reason.",
       "metadata": {{"helpful": 1}}
+    }},
+    {{
+      "type": "TAG",
+      "bullet_id": "existing_bullet_id",
+      "metadata": {{"helpful": 1}}
+    }},
+    {{
+      "type": "DEPRECATE",
+      "bullet_id": "harmful_bullet_id",
+      "metadata": {{"harmful": 1}}
     }},
     {{
       "type": "ADD",
@@ -135,4 +154,5 @@ CONSTRAINTS:
 - Use section "defaults" for ADD.
 - ADD at most 2 new bullets; otherwise UPDATE or TAG existing bullets.
 - If an equivalent bullet already exists, prefer UPDATE instead of ADD.
+- DEPRECATE/REMOVE bullets with harmful > helpful and low usage.
 """

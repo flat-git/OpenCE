@@ -11,6 +11,7 @@ from .delta import DeltaBatch
 from .llm import LLMClient
 from .playbook import Playbook
 from .prompts import CURATOR_PROMPT, GENERATOR_PROMPT, REFLECTOR_PROMPT
+from .curation_rules import CurationRules
 
 
 def _safe_json_loads(text: str) -> Dict[str, Any]:
@@ -115,6 +116,8 @@ class ReflectorOutput:
     correct_approach: str
     key_insight: str
     bullet_tags: List[BulletTag]
+    error_categories: List[str]  # New field
+    culprit_bullets: List[str]  # New field
     raw: Dict[str, Any]
 
 
@@ -140,10 +143,22 @@ class Reflector:
         playbook: Playbook,
         ground_truth: Optional[str],
         feedback: Optional[str],
+        diagnostics: Optional[object] = None,  # Diagnostics from environment
         max_refinement_rounds: int = 1,
         **kwargs: Any,
     ) -> ReflectorOutput:
         playbook_excerpt = _make_playbook_excerpt(playbook, generator_output.bullet_ids)
+        
+        # Add diagnostics to prompt if available
+        diagnostics_str = "(no diagnostics)"
+        if diagnostics:
+            try:
+                # Assuming diagnostics has a to_dict method
+                diagnostics_dict = diagnostics.to_dict() if hasattr(diagnostics, 'to_dict') else {}
+                diagnostics_str = json.dumps(diagnostics_dict, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        
         base_prompt = self.prompt_template.format(
             question=question,
             reasoning=generator_output.reasoning,
@@ -151,6 +166,7 @@ class Reflector:
             ground_truth=_format_optional(ground_truth),
             feedback=_format_optional(feedback),
             playbook_excerpt=playbook_excerpt or "(no bullets referenced)",
+            diagnostics=diagnostics_str,
         )
         result: Optional[ReflectorOutput] = None
         prompt = base_prompt
@@ -180,6 +196,14 @@ class Reflector:
                         correct_approach=str(data.get("correct_approach", "")),
                         key_insight=str(data.get("key_insight", "")),
                         bullet_tags=bullet_tags,
+                        error_categories=[
+                            str(cat) for cat in data.get("error_categories", [])
+                            if isinstance(cat, str)
+                        ],
+                        culprit_bullets=[
+                            str(bid) for bid in data.get("culprit_bullets", [])
+                            if isinstance(bid, (str, int))
+                        ],
                         raw=data,
                     )
                     result = candidate
@@ -216,10 +240,14 @@ class Curator:
         prompt_template: str = CURATOR_PROMPT,
         *,
         max_retries: int = 3,
+        enable_validation: bool = False,  # Default to False for backward compatibility
+        curation_rules: Optional[CurationRules] = None,
     ) -> None:
         self.llm = llm
         self.prompt_template = prompt_template
         self.max_retries = max_retries
+        self.enable_validation = enable_validation
+        self.curation_rules = curation_rules or CurationRules() if enable_validation else None
 
     def curate(
         self,
@@ -244,6 +272,13 @@ class Curator:
             try:
                 data = _safe_json_loads(response.text)
                 delta = DeltaBatch.from_json(data)
+                
+                # Validate operations if enabled
+                if self.enable_validation and self.curation_rules:
+                    delta.operations = self.curation_rules.validate_operations(
+                        delta.operations, playbook
+                    )
+                
                 return CuratorOutput(delta=delta, raw=data)
             except ValueError as err:
                 last_error = err

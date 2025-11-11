@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from .deduplication import Deduplicator
+from .diagnostics import Diagnostics
+from .gating import BulletGate, GatingConfig
 from .playbook import Playbook
 from .roles import Curator, CuratorOutput, Generator, GeneratorOutput, Reflector, ReflectorOutput
 
@@ -29,6 +31,7 @@ class EnvironmentResult:
     feedback: str
     ground_truth: Optional[str]
     metrics: Dict[str, float] = field(default_factory=dict)
+    diagnostics: Optional[Diagnostics] = None
 
 
 class TaskEnvironment(ABC):
@@ -62,7 +65,9 @@ class AdapterBase:
         reflector: Reflector,
         curator: Curator,
         max_refinement_rounds: int = 1,
-        reflection_window: int = 3,
+        reflection_window: int = 20,  # Updated from 3 to 20
+        enable_gating: bool = True,
+        gating_config: Optional[GatingConfig] = None,
     ) -> None:
         self.playbook = playbook or Playbook()
         self.generator = generator
@@ -70,6 +75,8 @@ class AdapterBase:
         self.curator = curator
         self.max_refinement_rounds = max_refinement_rounds
         self.reflection_window = reflection_window
+        self.enable_gating = enable_gating
+        self.bullet_gate = BulletGate(gating_config) if enable_gating else None
         self._recent_reflections: List[str] = []
 
     # ------------------------------------------------------------------ #
@@ -88,6 +95,96 @@ class AdapterBase:
                 self.playbook.tag_bullet(tag.id, tag.tag)
             except ValueError:
                 continue
+    
+    def _update_bullet_scores(
+        self,
+        env_result: EnvironmentResult,
+        generator_output: GeneratorOutput,
+        sample: Sample,
+    ) -> None:
+        """
+        Update helpful/harmful counts and relevance scores for bullets.
+        
+        Uses diagnostics to determine decision class and updates bullets accordingly.
+        """
+        if not env_result.diagnostics:
+            return
+        
+        diagnostics = env_result.diagnostics
+        decision_class = self._classify_decision(diagnostics)
+        
+        # Get bullets that influenced this decision
+        decision_bullets = diagnostics.decision_basis_bullets or generator_output.bullet_ids
+        
+        # Calculate relevance if gating is enabled
+        relevance = 1.0
+        if self.bullet_gate and sample.question:
+            # Average relevance across used bullets
+            relevances = []
+            for bullet_id in decision_bullets:
+                bullet = self.playbook.get_bullet(bullet_id)
+                if bullet:
+                    rel = self.bullet_gate.compute_similarity(sample.question, bullet.content)
+                    relevances.append(rel)
+            if relevances:
+                relevance = sum(relevances) / len(relevances)
+        
+        # Update helpful/harmful based on decision class
+        if decision_class == "POSITIVE":
+            # Correct positive: increment helpful for used bullets
+            for bullet_id in decision_bullets:
+                bullet = self.playbook.tag_bullet(bullet_id, "helpful", increment=1)
+                if bullet:
+                    bullet.relevance_score = (bullet.helpful - bullet.harmful) * relevance
+        
+        elif decision_class == "NEGATIVE":
+            # Check if this is a false negative (high coverage but marked negative)
+            if diagnostics.coverage >= 0.5:
+                # Potentially harmful: bullets caused over-conservative rejection
+                for bullet_id in decision_bullets:
+                    bullet = self.playbook.tag_bullet(bullet_id, "harmful", increment=1)
+                    if bullet:
+                        bullet.relevance_score = (bullet.helpful - bullet.harmful) * relevance
+            # For true negatives with low coverage, don't update (neutral)
+        
+        elif decision_class == "UNCERTAIN":
+            # Mark as neutral
+            for bullet_id in decision_bullets:
+                bullet = self.playbook.tag_bullet(bullet_id, "neutral", increment=1)
+    
+    def _classify_decision(self, diagnostics: Diagnostics) -> str:
+        """
+        Classify decision into POSITIVE/UNCERTAIN/NEGATIVE based on diagnostics.
+        
+        Rules:
+        - POSITIVE: core elements explicitly satisfied AND coverage >= 0.7
+        - UNCERTAIN: 0.4 <= coverage < 0.7 OR core elements functional match
+        - NEGATIVE: coverage < 0.4 OR core elements missing
+        """
+        coverage = diagnostics.coverage
+        
+        # Check core elements
+        core_elements = [e for e in diagnostics.elements if e.is_core]
+        if not core_elements:
+            # No core elements defined, use coverage only
+            if coverage >= 0.7:
+                return "POSITIVE"
+            elif coverage >= 0.4:
+                return "UNCERTAIN"
+            else:
+                return "NEGATIVE"
+        
+        # Check if all core elements are explicitly satisfied
+        core_explicit = all(e.match == "explicit" for e in core_elements)
+        core_functional = any(e.match == "functional" for e in core_elements)
+        core_missing = any(e.match == "none" for e in core_elements)
+        
+        if core_explicit and coverage >= 0.7:
+            return "POSITIVE"
+        elif core_missing or coverage < 0.4:
+            return "NEGATIVE"
+        else:
+            return "UNCERTAIN"
 
     def _question_context(self, sample: Sample, environment_result: EnvironmentResult) -> str:
         parts = [
@@ -119,12 +216,17 @@ class AdapterBase:
             reflection=self._reflection_context(),
         )
         env_result = environment.evaluate(sample, generator_output)
+        
+        # Update bullet scores based on diagnostics
+        self._update_bullet_scores(env_result, generator_output, sample)
+        
         reflection = self.reflector.reflect(
             question=sample.question,
             generator_output=generator_output,
             playbook=self.playbook,
             ground_truth=env_result.ground_truth,
             feedback=env_result.feedback,
+            diagnostics=env_result.diagnostics,
             max_refinement_rounds=self.max_refinement_rounds,
         )
         self._apply_bullet_tags(reflection)
@@ -158,7 +260,9 @@ class OfflineAdapter(AdapterBase):
         curator: Curator,
         deduplicator: Optional[Deduplicator] = None,
         max_refinement_rounds: int = 1,
-        reflection_window: int = 3,
+        reflection_window: int = 20,
+        enable_gating: bool = False,  # Default to False for backward compatibility
+        gating_config: Optional[GatingConfig] = None,
     ) -> None:
         super().__init__(
             playbook=playbook,
@@ -167,6 +271,8 @@ class OfflineAdapter(AdapterBase):
             curator=curator,
             max_refinement_rounds=max_refinement_rounds,
             reflection_window=reflection_window,
+            enable_gating=enable_gating,
+            gating_config=gating_config,
         )
         self.deduplicator = deduplicator
 
