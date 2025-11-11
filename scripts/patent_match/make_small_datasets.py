@@ -18,8 +18,8 @@ def main():
 
     train_path = os.path.join(base, 'train.json')
     test_path = os.path.join(base, 'test.json')
-    out_train = os.path.join(base, 'train_50.json')
-    out_test = os.path.join(base, 'test_100.json')
+    out_train = os.path.join(base, 'train_10.json')
+    out_test = os.path.join(base, 'test_20.json')
 
     if not os.path.exists(train_path):
         raise FileNotFoundError(f'未找到训练集: {train_path}')
@@ -28,11 +28,11 @@ def main():
 
     if os.path.exists(test_path):
         test_data = load_json(test_path)
-        small_train = random.sample(train_data, min(50, len(train_data)))
-        small_test = random.sample(test_data, min(100, len(test_data)))
+        small_train = random.sample(train_data, min(10, len(train_data)))
+        small_test = random.sample(test_data, min(20, len(test_data)))
     else:
         n = len(train_data)
-        need_train, need_test = 50, 100
+        need_train, need_test = 10, 20
         if n < 1:
             raise ValueError('训练集为空')
         idx = list(range(n))

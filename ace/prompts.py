@@ -1,89 +1,138 @@
-"""Prompt templates adapted from the ACE paper for reuse."""
+"""Task-specific prompts for patent matching classification task (structured element alignment, recall-oriented)."""
 
-GENERATOR_PROMPT = """\
-You are an expert assistant that must solve the task using the provided playbook of strategies.
-Apply relevant bullets, avoid known mistakes, and show step-by-step reasoning.
+GENERATOR_PROMPT = """You are an expert patent analyzer performing candidate classification.
 
-Playbook:
+PLAYBOOK (previous learnings):
 {playbook}
 
-Recent reflection:
+PREVIOUS REFLECTIONS:
 {reflection}
 
-Question:
+TASK:
+Given a patent question (a patent claim) and candidate contexts, do STRICT element-wise classification per candidate as "positive" or "negative".
+
+Definitions:
+- positive: The candidate provides explicit or functionally equivalent evidence for ALL critical claim elements.
+  - If at least 80% of the critical elements are clearly evidenced and the missing ones are minor/implicit, you MAY still label positive, but you MUST note the missing elements in the reason.
+- negative: The candidate lacks evidence for one or more critical elements, or only contains superficial/keyword overlaps without element alignment.
+
+QUESTION (claim):
 {question}
 
-Additional context:
+CANDIDATES (classify each):
 {context}
 
-Respond with a compact JSON object:
+DO THIS STEP-BY-STEP FOR EACH CANDIDATE:
+1) Extract critical claim elements (no more than 5–7 concise items).
+2) Build an element-evidence map:
+   - Map each claim element to an evidence snippet (short quote) from the candidate; if not found, mark "missing".
+   - Consider functional equivalence and synonyms (e.g., "controller" ≈ "control unit", "temperature sensor" ≈ "thermal sensing device", "localize user" ≈ "determine user position").
+3) Decide label strictly by the rule above (ALL critical elements, or ≥80% when missing are minor), and provide a one-sentence reason summarizing coverage and any missing elements.
+
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
-  "reasoning": "<step-by-step chain of thought>",
-  "bullet_ids": ["<id1>", "<id2>", "..."],
-  "final_answer": "<concise final answer>"
-}}
-"""
+  "reasoning": "High-level summary of the element extraction, evidence alignment, and decision policy.",
+  "final_answer": "Summary such as 'Positive IDs: [id1,...]; Negative IDs: [id2,...]'",
+  "bullet_ids": ["ids of used bullets from playbook, if any"],
+  "elements": ["E1 ...", "E2 ...", "E3 ..."],  // concise critical elements for this claim
+  "evidence_map": {{
+    "candidate_id": {{
+      "E1": "evidence snippet or 'missing'",
+      "E2": "evidence snippet or 'missing'"
+    }}
+  }},
+  "predictions": [
+    {{
+      "id": "candidate_id",
+      "label": "positive|negative",
+      "reason": "One sentence: coverage summary; list missing elements if any (e.g., E3 missing)"
+    }}
+  ]
+}}"""
 
+REFLECTOR_PROMPT = """You are a reflection expert analyzing classification errors in patent matching.
 
-REFLECTOR_PROMPT = """\
-You are a senior reviewer diagnosing the generator's trajectory.
-Use the playbook, model reasoning, and feedback to identify mistakes and actionable insights.
-Output must be a single valid JSON object. Do NOT include analysis text or explanations outside the JSON.
-Begin the response with `{{` and end with `}}`.
-
-Question:
+QUESTION:
 {question}
-Model reasoning:
+
+YOUR REASONING:
 {reasoning}
-Model prediction: {prediction}
-Ground truth (if available): {ground_truth}
-Feedback: {feedback}
-Playbook excerpts consulted:
+
+YOUR PREDICTION (JSON):
+{prediction}
+
+GROUND TRUTH:
+{ground_truth}
+
+ENVIRONMENT FEEDBACK (includes metrics and error analysis):
+{feedback}
+
+PLAYBOOK BULLETS YOU USED:
 {playbook_excerpt}
 
-Return JSON:
+TASK:
+- Parse the feedback JSON to identify false negatives (FN) and false positives (FP, including hard_negative).
+- Use the provided elements and evidence_map (if present) to locate which claim elements were missed or misinterpreted.
+- Focus on systematic failure modes: (a) missing element verification, (b) failure to recognize functional equivalence, (c) being over-conservative when only minor elements are missing.
+
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
-  "reasoning": "<analysis>",
-  "error_identification": "<what went wrong>",
-  "root_cause_analysis": "<why it happened>",
-  "correct_approach": "<what should be done>",
-  "key_insight": "<reusable takeaway>",
-  "bullet_tags": [
-    {{"id": "<bullet-id>", "tag": "helpful|harmful|neutral"}}
-  ]
-}}
-"""
+  "reasoning": "What went wrong in element verification and decision policy.",
+  "missed_elements": [
+    "E2: missing evidence across multiple errors",
+    "E3: functional equivalence not recognized"
+  ],
+  "error_identification": "Summarize FN/FP patterns with 1–2 concrete examples (IDs only).",
+  "root_cause_analysis": "Explain why elements were missed or why over-conservatism happened.",
+  "correct_approach": "Concrete corrections (e.g., accept positive if ≥80% critical elements are covered; add synonym mapping X≈Y).",
+  "key_insight": "ONE concise rule to prevent similar errors next time.",
+  "bullet_tags": [{{"id": "bullet_id", "tag": "keep|revise|remove"}}]
+}}"""
 
+CURATOR_PROMPT = """You are a playbook curator converting reflection insights into concrete and compact classification guidelines.
 
-CURATOR_PROMPT = """\
-You are the curator of the ACE playbook. Merge the latest reflection into structured updates.
-Only add genuinely new material. Do not regenerate the entire playbook.
-Respond with a single valid JSON object only—no analysis or extra narration.
-
-Training progress: {progress}
-Playbook stats: {stats}
-
-Recent reflection:
-{reflection}
-
-Current playbook:
+CURRENT PLAYBOOK:
 {playbook}
 
-Question context:
+PLAYBOOK STATS:
+{stats}
+
+PROGRESS:
+{progress}
+
+REFLECTION (from error analysis):
+{reflection}
+
+QUESTION CONTEXT:
 {question_context}
 
-Respond with JSON:
+GOALS:
+- Reduce false negatives while keeping false positives low.
+- Prefer UPDATE to refine existing bullets; limit ADD to at most 2 per iteration.
+- Consolidate overlapping bullets (avoid duplicates); keep bullets short, actionable, and element-oriented.
+
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
-  "reasoning": "<how you decided on the updates>",
+  "reasoning": "Why these operations fix the observed errors.",
   "operations": [
     {{
-      "type": "ADD|UPDATE|TAG|REMOVE",
-      "section": "<section name>",
-      "content": "<bullet text>",
-      "bullet_id": "<optional existing id>",
-      "metadata": {{"helpful": 1, "harmful": 0}}
+      "type": "UPDATE",
+      "bullet_id": "existing_bullet_id",
+      "content": "Refine: require element-wise mapping; accept positive if ≥80% critical elements covered and missing ones are minor; list missing elements in reason.",
+      "metadata": {{"helpful": 1}}
+    }},
+    {{
+      "type": "ADD",
+      "section": "defaults",
+      "content": "Functional equivalence examples: controller≈control unit; temperature sensor≈thermal sensing device; localize user≈determine user position. Use these when aligning elements.",
+      "metadata": {{"helpful": 1}}
     }}
   ]
 }}
-If no updates are required, return an empty list for "operations".
+
+CONSTRAINTS:
+- Keys must be exactly: type, section, content, bullet_id, metadata.
+- Use section "defaults" for ADD.
+- ADD at most 2 new bullets; otherwise UPDATE or TAG existing bullets.
+- If an equivalent bullet already exists, prefer UPDATE instead of ADD.
 """

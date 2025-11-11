@@ -1,3 +1,4 @@
+# scripts/patent_match/run_eval.py
 #!/usr/bin/env python3
 """Evaluate ACE on patent matching classification task with frozen playbook."""
 
@@ -6,6 +7,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import datetime
+import logging
 from pathlib import Path
 from statistics import mean
 from typing import List, Tuple
@@ -26,6 +29,9 @@ from ace import (
 from loader import load_patent_samples
 from environment import PatentMatchEnvironment
 from prompts import GENERATOR_PROMPT_PATENT_CLS
+
+# 全局 logger（输出方式由 console_output 安装）
+logger = logging.getLogger("eval")
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +73,48 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print detailed per-sample results"
     )
+    parser.add_argument(
+        "--save-results",
+        default="runs/eval_results.txt",
+        help="Path to write evaluation summary"
+    )
+    parser.add_argument(
+        "--log-dir",
+        default="D:/Project/PyCharmProject/OpenCE/logs",
+        help="Directory to auto-save timestamped log file",
+    )
     return parser.parse_args()
+
+
+def _init_logging(log_dir: Path) -> Path:
+    """
+    使用 console_output 统一输出：创建时间戳日志文件并安装 logging/tqdm 补丁。
+    仅替换输出方式，不改评估逻辑。
+    """
+    from scripts.patent_match.console_output import install_output_patch
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"eval_{ts}.log"
+
+    install_output_patch(log_file_path=str(log_path))
+    logger.info(f"[log] 日志文件: {log_path}")
+    return log_path
+
+
+def _bullet_count(pb: Playbook) -> int:
+    """兼容 bullets 为列表或可调用方法的情况，返回要点数量。"""
+    bullets = getattr(pb, "bullets", None)
+    if bullets is None:
+        return 0
+    try:
+        bullets = bullets() if callable(bullets) else bullets
+    except Exception:
+        return 0
+    try:
+        return len(bullets)
+    except Exception:
+        return 0
 
 
 def evaluate_sample(
@@ -76,180 +123,223 @@ def evaluate_sample(
     environment: PatentMatchEnvironment,
     playbook: Playbook,
 ) -> Tuple[GeneratorOutput, EnvironmentResult]:
-    """Evaluate a single sample."""
     generator_output = generator.generate(
         question=sample.question,
         context=sample.context,
         playbook=playbook,
-        reflection=None,  # No reflection in eval mode
+        reflection=None,
     )
-    
     env_result = environment.evaluate(sample, generator_output)
     return generator_output, env_result
 
 
 def print_sample_details(idx: int, total: int, sample: Sample, env_result: EnvironmentResult) -> None:
-    """Print detailed per-sample evaluation results."""
     metrics = env_result.metrics
-    
-    print(f"\n{'='*80}")
-    print(f"Sample {idx}/{total}")
-    print(f"{'='*80}")
-    print(f"Question: {sample.question[:100]}...")
-    
-    # Parse context to get candidate count
+
+    logger.info("\n" + "=" * 80)
+    logger.info(f"Sample {idx}/{total}")
+    logger.info("=" * 80)
+    logger.info(f"Question: {sample.question[:100]}...")
+
     try:
         context_data = json.loads(sample.context)
         num_candidates = len(context_data.get("candidates", []))
-        print(f"Candidates: {num_candidates}")
-    except:
-        print(f"Candidates: unknown")
-    
-    # Print metrics
-    print(f"\nMetrics:")
-    print(f"  Accuracy:  {metrics.get('accuracy', 0):.2%}")
-    print(f"  Precision: {metrics.get('precision', 0):.2%}")
-    print(f"  Recall:    {metrics.get('recall', 0):.2%}")
-    print(f"  F1 Score:  {metrics.get('f1', 0):.2%}")
-    
-    # Parse and print error examples
+        logger.info(f"Candidates: {num_candidates}")
+    except Exception:
+        logger.info("Candidates: unknown")
+
+    logger.info("\nMetrics:")
+    logger.info(f"  Accuracy:  {metrics.get('accuracy', 0):.2%}")
+    logger.info(f"  Precision: {metrics.get('precision', 0):.2%}")
+    logger.info(f"  Recall:    {metrics.get('recall', 0):.2%}")
+    logger.info(f"  F1 Score:  {metrics.get('f1', 0):.2%}")
+
     feedback = env_result.feedback
     if "JSON:" in feedback:
         try:
             json_part = feedback.split("JSON:")[1].strip()
             error_data = json.loads(json_part)
-            
+
             fp_neg = error_data.get("fp_from_negative_ids", [])
             fp_hard_neg = error_data.get("fp_from_hard_negative_ids", [])
             fn_pos = error_data.get("fn_positive_ids", [])
             per_id_reason = error_data.get("per_id_reason", {})
-            
+
             if fp_neg or fp_hard_neg or fn_pos:
-                print(f"\nErrors:")
+                logger.info("\nErrors:")
                 if fp_neg:
-                    print(f"  FP (from negative): {len(fp_neg)} errors")
+                    logger.info(f"  FP (from negative): {len(fp_neg)} errors")
                     for fp_id in fp_neg[:2]:
                         reason = per_id_reason.get(fp_id, "N/A")
-                        print(f"    - {fp_id}: {reason[:80]}...")
-                
+                        logger.info(f"    - {fp_id}: {reason[:80]}...")
                 if fp_hard_neg:
-                    print(f"  FP (from hard_negative): {len(fp_hard_neg)} errors")
+                    logger.info(f"  FP (from hard_negative): {len(fp_hard_neg)} errors")
                     for fp_id in fp_hard_neg[:2]:
                         reason = per_id_reason.get(fp_id, "N/A")
-                        print(f"    - {fp_id}: {reason[:80]}...")
-                
+                        logger.info(f"    - {fp_id}: {reason[:80]}...")
                 if fn_pos:
-                    print(f"  FN (missed positive): {len(fn_pos)} errors")
+                    logger.info(f"  FN (missed positive): {len(fn_pos)} errors")
                     for fn_id in fn_pos[:2]:
                         reason = per_id_reason.get(fn_id, "N/A")
-                        print(f"    - {fn_id}: {reason[:80]}...")
+                        logger.info(f"    - {fn_id}: {reason[:80]}...")
         except Exception as e:
-            print(f"  (Could not parse error details: {e})")
+            logger.info(f"  (Could not parse error details: {e})")
 
 
 def print_final_summary(results: List[EnvironmentResult]) -> None:
-    """Print final aggregate evaluation results."""
-    # Calculate average metrics
     all_accuracies = [r.metrics.get("accuracy", 0) for r in results]
     all_precisions = [r.metrics.get("precision", 0) for r in results]
     all_recalls = [r.metrics.get("recall", 0) for r in results]
     all_f1s = [r.metrics.get("f1", 0) for r in results]
-    
-    print(f"\n{'#'*80}")
-    print(f"FINAL EVALUATION RESULTS")
-    print(f"{'#'*80}")
-    print(f"Samples evaluated: {len(results)}")
-    print(f"\nAggregate Metrics:")
-    print(f"  Accuracy:  {mean(all_accuracies):.2%} (avg)")
-    print(f"  Precision: {mean(all_precisions):.2%} (avg)")
-    print(f"  Recall:    {mean(all_recalls):.2%} (avg)")
-    print(f"  F1 Score:  {mean(all_f1s):.2%} (avg)")
-    
-    # Calculate total TP, FP, FN, TN for micro-averaged metrics
+
+    logger.info("\n" + "#" * 80)
+    logger.info("FINAL EVALUATION RESULTS")
+    logger.info("#" * 80)
+    logger.info(f"Samples evaluated: {len(results)}")
+    logger.info("\nAggregate Metrics:")
+    logger.info(f"  Accuracy:  {mean(all_accuracies):.2%}")
+    logger.info(f"  Precision: {mean(all_precisions):.2%}")
+    logger.info(f"  Recall:    {mean(all_recalls):.2%}")
+    logger.info(f"  F1 Score:  {mean(all_f1s):.2%}")
+
     total_tp = sum(r.metrics.get("tp", 0) for r in results)
     total_fp = sum(r.metrics.get("fp", 0) for r in results)
     total_fn = sum(r.metrics.get("fn", 0) for r in results)
     total_tn = sum(r.metrics.get("tn", 0) for r in results)
     total = total_tp + total_fp + total_fn + total_tn
-    
+
     micro_accuracy = (total_tp + total_tn) / total if total > 0 else 0.0
     micro_precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
     micro_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
-    micro_f1 = 2 * micro_precision * micro_recall / (micro_precision + micro_recall) if (micro_precision + micro_recall) > 0 else 0.0
-    
-    print(f"\nMicro-Averaged Metrics (across all candidates):")
-    print(f"  Accuracy:  {micro_accuracy:.2%}")
-    print(f"  Precision: {micro_precision:.2%}")
-    print(f"  Recall:    {micro_recall:.2%}")
-    print(f"  F1 Score:  {micro_f1:.2%}")
-    print(f"\nConfusion Matrix (total):")
-    print(f"  TP: {int(total_tp)}, FP: {int(total_fp)}")
-    print(f"  FN: {int(total_fn)}, TN: {int(total_tn)}")
-    print(f"{'#'*80}\n")
+    micro_f1 = (
+        2 * micro_precision * micro_recall / (micro_precision + micro_recall)
+        if (micro_precision + micro_recall) > 0
+        else 0.0
+    )
+
+    logger.info("\nMicro-Averaged Metrics (across all candidates):")
+    logger.info(f"  Accuracy:  {micro_accuracy:.2%}")
+    logger.info(f"  Precision: {micro_precision:.2%}")
+    logger.info(f"  Recall:    {micro_recall:.2%}")
+    logger.info(f"  F1 Score:  {micro_f1:.2%}")
+    logger.info("\nConfusion Matrix (total):")
+    logger.info(f"  TP: {int(total_tp)}, FP: {int(total_fp)}")
+    logger.info(f"  FN: {int(total_fn)}, TN: {int(total_tn)}")
+    logger.info("#" * 80 + "\n")
+
+
+def _write_eval_results(results: List[EnvironmentResult], out_path: Path) -> None:
+    all_accuracies = [r.metrics.get("accuracy", 0) for r in results]
+    all_precisions = [r.metrics.get("precision", 0) for r in results]
+    all_recalls = [r.metrics.get("recall", 0) for r in results]
+    all_f1s = [r.metrics.get("f1", 0) for r in results]
+
+    macro_acc = mean(all_accuracies) if all_accuracies else 0.0
+    macro_prec = mean(all_precisions) if all_precisions else 0.0
+    macro_rec = mean(all_recalls) if all_recalls else 0.0
+    macro_f1 = mean(all_f1s) if all_f1s else 0.0
+
+    total_tp = sum(r.metrics.get("tp", 0) for r in results)
+    total_fp = sum(r.metrics.get("fp", 0) for r in results)
+    total_fn = sum(r.metrics.get("fn", 0) for r in results)
+    total_tn = sum(r.metrics.get("tn", 0) for r in results)
+    total = total_tp + total_fp + total_fn + total_tn
+
+    micro_accuracy = (total_tp + total_tn) / total if total > 0 else 0.0
+    micro_precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+    micro_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+    micro_f1 = (
+        2 * micro_precision * micro_recall / (micro_precision + micro_recall)
+        if (micro_precision + micro_recall) > 0
+        else 0.0
+    )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write("################################################################################\n")
+        f.write("FINAL EVALUATION RESULTS\n")
+        f.write("################################################################################\n")
+        f.write(f"Samples evaluated: {len(results)}\n\n")
+
+        f.write("Aggregate Metrics (macro):\n")
+        f.write(f"  Accuracy:  {macro_acc:.2%}\n")
+        f.write(f"  Precision: {macro_prec:.2%}\n")
+        f.write(f"  Recall:    {macro_rec:.2%}\n")
+        f.write(f"  F1 Score:  {macro_f1:.2%}\n\n")
+
+        f.write("Micro-Averaged Metrics (across all candidates):\n")
+        f.write(f"  Accuracy:  {micro_accuracy:.2%}\n")
+        f.write(f"  Precision: {micro_precision:.2%}\n")
+        f.write(f"  Recall:    {micro_recall:.2%}\n")
+        f.write(f"  F1 Score:  {micro_f1:.2%}\n\n")
+
+        f.write("Confusion Matrix (total):\n")
+        f.write(f"  TP: {int(total_tp)}, FP: {int(total_fp)}\n")
+        f.write(f"  FN: {int(total_fn)}, TN: {int(total_tn)}\n")
+        f.write("################################################################################\n")
 
 
 def main() -> None:
     args = parse_args()
-    
-    # Load test data
-    print(f"Loading test data from {args.test_json}...")
+    log_path = _init_logging(Path(args.log_dir))
+
+    logger.info(f"Loading test data from {args.test_json}...")
     test_samples = load_patent_samples(Path(args.test_json))
-    print(f"Loaded {len(test_samples)} test samples")
-    
-    # Initialize DeepSeek client
-    print(f"\nInitializing DeepSeek client (model: {args.model})...")
+    logger.info(f"Loaded {len(test_samples)} test samples")
+
+    logger.info(f"\nInitializing DeepSeek client (model: {args.model})...")
     client = DeepSeekClient(
         model=args.model,
         base_url=args.deepseek_base_url,
     )
-    
-    # Load playbook if provided
+
     playbook = Playbook()
     if args.playbook_path:
-        print(f"Loading playbook from {args.playbook_path}...")
-        playbook = Playbook.load(Path(args.playbook_path))
-        print(f"Loaded playbook with {len(playbook.bullets)} bullets")
+        p = Path(args.playbook_path)
+        logger.info(f"Loading playbook from {p}...")
+        text = p.read_text(encoding="utf-8")
+        playbook = Playbook.loads(text)
+        logger.info(f"Loaded playbook with {_bullet_count(playbook)} bullets")
     else:
-        print("No playbook provided, using empty playbook")
-    
-    # Initialize generator (no reflector/curator in eval mode)
+        logger.info("No playbook provided, using empty playbook")
+
     generator = Generator(
         llm=client,
         prompt_template=GENERATOR_PROMPT_PATENT_CLS,
     )
-    
-    # Initialize environment
+
     environment = PatentMatchEnvironment()
-    
-    # Evaluation loop
-    print(f"\nStarting evaluation on {len(test_samples)} samples...")
-    print(f"Configuration:")
-    print(f"  Temperature: {args.temperature}")
-    print(f"  Max tokens: {args.max_new_tokens}")
-    
+
+    logger.info(f"\nStarting evaluation on {len(test_samples)} samples...")
+    logger.info("Configuration:")
+    logger.info(f"  Temperature: {args.temperature}")
+    logger.info(f"  Max tokens: {args.max_new_tokens}")
+
     results: List[EnvironmentResult] = []
-    
+
     for idx, sample in enumerate(test_samples, 1):
         generator_output, env_result = evaluate_sample(
             sample, generator, environment, playbook
         )
         results.append(env_result)
-        
+
         if args.verbose:
             print_sample_details(idx, len(test_samples), sample, env_result)
         else:
-            # Print progress without details
             metrics = env_result.metrics
-            print(f"Sample {idx}/{len(test_samples)}: "
-                  f"Acc={metrics.get('accuracy', 0):.2%}, "
-                  f"P={metrics.get('precision', 0):.2%}, "
-                  f"R={metrics.get('recall', 0):.2%}, "
-                  f"F1={metrics.get('f1', 0):.2%}")
-    
-    # Print final summary
+            logger.info(
+                f"Sample {idx}/{len(test_samples)}: "
+                f"Acc={metrics.get('accuracy', 0):.2%}, "
+                f"P={metrics.get('precision', 0):.2%}, "
+                f"R={metrics.get('recall', 0):.2%}, "
+                f"F1={metrics.get('f1', 0):.2%}"
+            )
+
     print_final_summary(results)
-    
-    print("Evaluation complete!")
+    _write_eval_results(results, Path(args.save_results))
+    logger.info(f"Saved evaluation summary to {args.save_results}")
+    logger.info("Evaluation complete!")
+    logger.info(f"日志已保存到: {log_path}")
 
 
 if __name__ == "__main__":
