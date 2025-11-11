@@ -25,7 +25,7 @@ INSTRUCTIONS:
 3. Avoid being fooled by similar terminology without substantive alignment
 4. Consider element-wise evidence mapping before making final judgment
 
-OUTPUT FORMAT (strict JSON only):
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
   "reasoning": "Step-by-step analysis of classification strategy and element alignment",
   "final_answer": "Summary of classification results, e.g., 'Selected positive IDs: [id1, id2]'",
@@ -37,14 +37,7 @@ OUTPUT FORMAT (strict JSON only):
       "reason": "One sentence explanation of why this classification was made"
     }}
   ]
-}}
-
-IMPORTANT:
-- You MUST output valid JSON only, no extra text
-- Every candidate in context must have a prediction
-- Label must be exactly "positive" or "negative"
-- Reason should explain element-wise evidence alignment
-"""
+}}"""
 
 REFLECTOR_PROMPT_PATENT_CLS = """You are a reflection expert analyzing classification errors in patent matching.
 
@@ -75,7 +68,7 @@ Analyze the classification errors deeply:
 3. Extract ONE key actionable insight that would prevent similar errors
 4. Tag relevant playbook bullets with status: "keep", "revise", or "remove"
 
-OUTPUT FORMAT (strict JSON only):
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
   "reasoning": "Analysis of what went wrong in the classification process",
   "error_identification": "Detailed breakdown of FP and FN errors by type with examples",
@@ -85,13 +78,7 @@ OUTPUT FORMAT (strict JSON only):
   "bullet_tags": [
     {{"id": "bullet_id", "tag": "keep|revise|remove"}}
   ]
-}}
-
-IMPORTANT:
-- Output valid JSON only
-- Focus on systematic error patterns, not individual mistakes
-- Key insight must be concise and directly actionable
-"""
+}}"""
 
 CURATOR_PROMPT_PATENT_CLS = """You are a playbook curator converting reflection insights into concrete classification guidelines.
 
@@ -117,42 +104,39 @@ Transform the reflection's key_insight and error analysis into playbook operatio
    - Common trap patterns to avoid (keyword distractions, surface similarities)
    - Evidence alignment requirements
 2. UPDATE existing bullets if they need refinement based on new insights
-3. REMOVE or TAG bullets that led to errors
+3. TAG (via metadata counters) bullets that led to errors:
+   - Use {{"helpful": 1}} to upvote helpful bullets
+   - Use {{"harmful": 1}} to downvote harmful bullets
+4. REMOVE clearly harmful or redundant bullets
 
-Focus on classification strategy improvements:
-- How to decompose patent claims into verifiable elements
-- How to avoid false positive traps (negative/hard_negative mislabeled as positive)
-- How to catch false negatives (missed positive cases)
-- Specific verification steps before assigning labels
+Constraints:
+- Use section "defaults" for new bullets
+- Keep bullets concise and actionable (3-5 operations per iteration)
+- Preserve interpretability and avoid redundancy
 
-OUTPUT FORMAT (strict JSON only):
+STRICT OUTPUT (valid JSON only, NO code fences, NO extra text):
 {{
+  "reasoning": "Brief explanation of how the operations reflect the reflection insights",
   "operations": [
     {{
-      "operation": "ADD",
+      "type": "ADD",
+      "section": "defaults",
       "content": "Concise guideline focused on element-wise verification or trap avoidance",
-      "tags": ["classification", "element_check"]
+      "metadata": {{"helpful": 1}}
     }},
     {{
-      "operation": "UPDATE",
+      "type": "UPDATE",
       "bullet_id": "existing_bullet_id",
       "content": "Refined guideline incorporating new insight"
     }},
     {{
-      "operation": "TAG",
+      "type": "TAG",
       "bullet_id": "existing_bullet_id",
-      "tag": "keep|harmful|outdated"
+      "metadata": {{"helpful": 1}}
     }},
     {{
-      "operation": "REMOVE",
+      "type": "REMOVE",
       "bullet_id": "bullet_id_to_remove"
     }}
   ]
-}}
-
-IMPORTANT:
-- Output valid JSON only, no extra text
-- Each bullet should be actionable and specific to patent classification
-- Focus on preventing the error patterns identified in reflection
-- Limit to 3-5 operations per iteration to maintain playbook quality
-"""
+}}"""

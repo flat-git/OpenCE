@@ -23,41 +23,13 @@ def _normalize_ctx_list(raw_ctx: Any) -> List[Dict[str, Any]]:
 
 def load_patent_samples(path: Path) -> List[Sample]:
     """
-    Load patent matching samples from a JSON file in the 'original' format:
-
-    [
-        {
-            "question": "...",
-            "positive_ctxs": [
-                {"title": "...", "text": "...", "passage_id": ""}, ...
-            ],
-            "negative_ctxs": [
-                {"title": "...", "text": "...", "passage_id": ""}, ...
-            ],
-            "hard_negative_ctxs": [
-                {"title": "...", "text": "...", "passage_id": ""}, ...
-            ]
-        },
-        ...
-    ]
+    Load patent matching samples from a JSON file in the 'original' format and
+    auto-generate stable IDs when missing.
 
     ID generation (when missing):
       positive      -> p{sample_index}_{k}
       negative      -> n{sample_index}_{k}
       hard_negative -> hn{sample_index}_{k}
-
-    If a context dict already contains a non-empty 'id' key, that value is preserved.
-
-    Returns:
-        List[Sample] where Sample.context is a JSON string:
-        {
-          "candidates": [
-             {"id": "...", "text": "...", "label": "positive|negative",
-              "type": "positive|negative|hard_negative", "title": "..."}
-          ],
-          "ground_truth_ids": ["id1", "id2", ...]
-        }
-        Sample.ground_truth stores JSON string of ground_truth_ids (positive IDs).
     """
     with path.open('r', encoding='utf-8') as f:
         data = json.load(f)

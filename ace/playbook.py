@@ -1,5 +1,8 @@
 """Playbook storage and mutation logic for ACE."""
 
+# file: ace/playbook.py —— 在顶部 imports 增加
+from pathlib import Path
+
 from __future__ import annotations
 
 import json
