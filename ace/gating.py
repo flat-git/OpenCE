@@ -27,11 +27,11 @@ class GatingConfig:
 class BulletGate:
     """Selects relevant bullets based on sample similarity."""
     
-    def __init__(self, config: Optional[GatingConfig] = None):
+    def __init__(self, config: Optional[GatingConfig] = None, auto_load_encoder: bool = False):
         self.config = config or GatingConfig()
         self._encoder: Optional[object] = None
         
-        if EMBEDDINGS_AVAILABLE:
+        if EMBEDDINGS_AVAILABLE and auto_load_encoder:
             try:
                 self._encoder = SentenceTransformer(self.config.model_name)
             except Exception:
