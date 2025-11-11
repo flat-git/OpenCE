@@ -78,6 +78,7 @@ class OfflineAdapterTest(unittest.TestCase):
             reflector=reflector,
             curator=curator,
             max_refinement_rounds=1,
+            enable_gating=False,  # Disable gating in tests to avoid network access
             deduplicator=None,
         )
 

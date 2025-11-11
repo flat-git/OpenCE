@@ -21,6 +21,8 @@ class Bullet:
     helpful: int = 0
     harmful: int = 0
     neutral: int = 0
+    tags: List[str] = field(default_factory=list)  # Tags for categorization
+    relevance_score: float = 0.0  # (helpful - harmful) * relevance
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -89,6 +91,16 @@ class Playbook:
         if bullet is None:
             return None
         bullet.tag(tag, increment=increment)
+        return bullet
+    
+    def add_bullet_tag(self, bullet_id: str, tag: str) -> Optional[Bullet]:
+        """Add a categorical tag to a bullet (e.g., 'type:synonym', 'core', 'domain:patent')."""
+        bullet = self._bullets.get(bullet_id)
+        if bullet is None:
+            return None
+        if tag not in bullet.tags:
+            bullet.tags.append(tag)
+            bullet.updated_at = datetime.now(timezone.utc).isoformat()
         return bullet
 
     def remove_bullet(self, bullet_id: str) -> None:

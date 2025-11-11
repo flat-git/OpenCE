@@ -2,6 +2,10 @@
 
 from .playbook import Bullet, Playbook
 from .delta import DeltaOperation, DeltaBatch
+from .diagnostics import Diagnostics, ElementExtractor, ElementMatch
+from .gating import BulletGate, GatingConfig
+from .curation_rules import CurationRules
+from .reporting import PlaybookReporter, BulletReport
 from .llm import LLMClient, DummyLLMClient, TransformersLLMClient
 from .llm_deepseek import DeepSeekClient
 from .roles import (
@@ -11,6 +15,7 @@ from .roles import (
     GeneratorOutput,
     ReflectorOutput,
     CuratorOutput,
+    BulletTag,
 )
 from .adaptation import (
     OfflineAdapter,
@@ -26,6 +31,14 @@ __all__ = [
     "Playbook",
     "DeltaOperation",
     "DeltaBatch",
+    "Diagnostics",
+    "ElementExtractor",
+    "ElementMatch",
+    "BulletGate",
+    "GatingConfig",
+    "CurationRules",
+    "PlaybookReporter",
+    "BulletReport",
     "LLMClient",
     "DummyLLMClient",
     "TransformersLLMClient",
@@ -36,6 +49,7 @@ __all__ = [
     "GeneratorOutput",
     "ReflectorOutput",
     "CuratorOutput",
+    "BulletTag",
     "OfflineAdapter",
     "OnlineAdapter",
     "Sample",
